@@ -32,7 +32,16 @@ func newRunCmd() *cobra.Command {
 	o := Options{}
 	cmd := &cobra.Command{
 		Use:  "migrate",
-		RunE: o.Run,
+		Long: "Generate an OLM ClusterServiceVersion (CSV) resource from an input directory containing a list of static Kubernetes YAML manifests",
+		Example: `
+Generate a "combo-operator" CSV and override the default manifest directory:
+/bin/csv migrate --csv-name combo-operator --manifests $(readlink -f ../combo/manifests)
+
+Generate a "combo-operator" CSV and strip any empty values that are present in the output CSV:
+./bin/csv migrate --csv-name combo-operator --output-file | faq -f yaml 'del(.status,.metadata.creationTimestamp,.spec.provider,.spec.apiservicedefinitions)' csv.yaml
+		`,
+		SilenceUsage: true,
+		RunE:         o.Run,
 	}
 	cmd.Flags().StringVar(&o.manifestDir, "manifests", "./manifests", "path to the manifests directory")
 	cmd.Flags().StringVar(&o.outputFile, "output-file", "", "configures the output file for the generated CSV")
@@ -207,7 +216,6 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 	}
 	defer outputFile.Close()
 
-	// TODO: handle case where empty fields are being encoded
 	logger.Debugf("creating the generated CSV at the %v file", outputFile.Name())
 	s := json.NewYAMLSerializer(json.DefaultMetaFactory, scheme.Scheme, scheme.Scheme)
 	if err := s.Encode(csv, outputFile); err != nil {
