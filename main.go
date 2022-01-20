@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -21,6 +22,7 @@ import (
 type Options struct {
 	manifestDir      string
 	stripDescriptors bool
+	outputFile       string
 }
 
 func newRunCmd() *cobra.Command {
@@ -31,6 +33,7 @@ func newRunCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&o.manifestDir, "manifests", "./manifests", "path to the manifests directory")
 	cmd.Flags().BoolVar(&o.stripDescriptors, "strip-descriptors", true, "controls whether CRD descriptions will be stripped when processing a CRD YAML manifest")
+	cmd.Flags().StringVar(&o.outputFile, "output-file", "", "configures the output file for the generated CSV")
 
 	return cmd
 }
@@ -165,8 +168,24 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 		csv.Spec.InstallStrategy.StrategySpec.DeploymentSpecs = deploymentSpecs
 	}
 
+	outputFile := os.Stdout
+	if o.outputFile != "" {
+		_, err := os.Stat(o.outputFile)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("failed to open the configured output file (%s): %v", o.outputFile, err)
+			}
+		}
+		outputFile, err = os.Create(o.outputFile)
+		if err != nil {
+			return err
+		}
+	}
+	defer outputFile.Close()
+
+	fmt.Printf("creating the generated CSV at the %v file\n", outputFile.Name())
 	s := json.NewYAMLSerializer(json.DefaultMetaFactory, scheme.Scheme, scheme.Scheme)
-	if err := s.Encode(csv, os.Stdout); err != nil {
+	if err := s.Encode(csv, outputFile); err != nil {
 		return err
 	}
 
