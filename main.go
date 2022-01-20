@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/client-go/kubernetes/scheme"
 )
@@ -23,6 +24,8 @@ type Options struct {
 	manifestDir      string
 	stripDescriptors bool
 	outputFile       string
+	logLevel         string
+	csvName          string
 }
 
 func newRunCmd() *cobra.Command {
@@ -32,8 +35,14 @@ func newRunCmd() *cobra.Command {
 		RunE: o.Run,
 	}
 	cmd.Flags().StringVar(&o.manifestDir, "manifests", "./manifests", "path to the manifests directory")
-	cmd.Flags().BoolVar(&o.stripDescriptors, "strip-descriptors", true, "controls whether CRD descriptions will be stripped when processing a CRD YAML manifest")
 	cmd.Flags().StringVar(&o.outputFile, "output-file", "", "configures the output file for the generated CSV")
+	cmd.Flags().StringVar(&o.logLevel, "log-level", logrus.InfoLevel.String(), "log level")
+	cmd.Flags().StringVar(&o.csvName, "csv-name", "", "configures the metadata.Name of the generated CSV")
+	cmd.Flags().BoolVar(&o.stripDescriptors, "strip-descriptors", true, "controls whether CRD descriptions will be stripped when processing a CRD YAML manifest")
+
+	if err := cmd.MarkFlagRequired("csv-name"); err != nil {
+		panic(err)
+	}
 
 	return cmd
 }
@@ -55,13 +64,28 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 		deploymentSpecs []operatorsv1alpha1.StrategyDeploymentSpec
 	)
 
+	logger := logrus.WithFields(logrus.Fields{
+		"manifestDir": o.manifestDir,
+		"outputFile":  o.outputFile,
+	})
+	level, err := logrus.ParseLevel(o.logLevel)
+	if err != nil {
+		return fmt.Errorf("failed to parse the %s log level: %v", o.logLevel, err)
+	}
+	logger.Logger.Level = level
+
 	apiextensionsv1.AddToScheme(scheme.Scheme)
 	decoder := scheme.Codecs.UniversalDeserializer()
 
 	fsys := os.DirFS(o.manifestDir)
 	csv := &operatorsv1alpha1.ClusterServiceVersion{}
+	csv.TypeMeta = metav1.TypeMeta{
+		APIVersion: operatorsv1alpha1.ClusterServiceVersionAPIVersion,
+		Kind:       operatorsv1alpha1.ClusterServiceVersionKind,
+	}
+	csv.SetName(o.csvName)
 
-	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if filepath.Ext(path) != ".yaml" {
 			return nil
 		}
@@ -87,7 +111,7 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 			}
 			obj, gvk, err := decoder.Decode([]byte(resource), nil, nil)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "failed to decode manifest", path)
+				logger.Warnf("failed to decode manifest", path)
 				continue
 			}
 
@@ -183,7 +207,8 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 	}
 	defer outputFile.Close()
 
-	fmt.Printf("creating the generated CSV at the %v file\n", outputFile.Name())
+	// TODO: handle case where empty fields are being encoded
+	logger.Debugf("creating the generated CSV at the %v file", outputFile.Name())
 	s := json.NewYAMLSerializer(json.DefaultMetaFactory, scheme.Scheme, scheme.Scheme)
 	if err := s.Encode(csv, outputFile); err != nil {
 		return err
