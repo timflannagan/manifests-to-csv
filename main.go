@@ -167,7 +167,7 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 				descriptions = append(descriptions, operatorsv1alpha1.CRDDescription{
 					Name:    crd.Name,
 					Version: storedVersion,
-					Kind:    crd.Spec.Group,
+					Kind:    crd.Spec.Names.Kind,
 				})
 			}
 		}
