@@ -157,10 +157,17 @@ func (o *Options) Run(cmd *cobra.Command, args []string) error {
 				if !ok {
 					continue
 				}
+				var storedVersion string
+				for _, version := range crd.Spec.Versions {
+					if version.Storage {
+						storedVersion = version.Name
+						break
+					}
+				}
 				descriptions = append(descriptions, operatorsv1alpha1.CRDDescription{
 					Name:    crd.Name,
-					Version: crd.APIVersion,
-					Kind:    crd.Kind,
+					Version: storedVersion,
+					Kind:    crd.Spec.Group,
 				})
 			}
 		}
